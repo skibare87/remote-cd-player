@@ -1,2 +1,2 @@
 #!/bin/bash
-docker build -t docker.dingo.bar/cdapi:latest --no-cache . && docker push docker.dingo.bar/cdapi:latest
+docker build -t cdapi:latest --no-cache .

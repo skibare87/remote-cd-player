@@ -1,6 +1,6 @@
 services:
   cdplayer-backend:
-    image: docker.dingo.bar/cdapi:latest
+    image: cdapi:latest
     devices:
       - "/dev/cdrom:/dev/cdrom:rwm"
     volumes:
