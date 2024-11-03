@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web CD Player</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="cdfunctions.js" defer></script>
+</head>
+<body>
+    <div class="player-container">
+        <div class="title-bar">
+            <span>Web CD Player</span>
+            <span id="cd-info">No CD</span>
+        </div>
+        
+        <div class="track-info">
+            <div id="current-track">No track playing</div>
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar">
+                    <div class="progress" id="progress"></div>
+                </div>
+                <div class="time-display">
+                    <span id="current-time">0:00</span>
+                    <span id="total-time">0:00</span>
+                </div>
+            </div>
+        </div>
+        
+       <div class="controls">
+    		<button class="control-button" id="prev-button"  title="Previous Track (←)">⏮</button>
+    		<button class="control-button" id="play-pause"  title="Play/Pause (Space)">▶</button>
+    		<button class="control-button" id="stop-button"  title="Stop (Esc)">⏹</button>
+    		<button class="control-button" id="next-button"  title="Next Track (→)">⏭</button>
+	</div> 
+        <div class="playlist" id="playlist">
+            <div class="status-message">Checking for CD...</div>
+        </div>
+
+        <div class="keyboard-shortcuts">
+            <div>Space: Play/Pause</div>
+            <div>Esc: Stop</div>
+            <div>←/→: Previous/Next Track</div>
+            <div>R: Restart from first track</div>
+        </div>
+    </div>
+</body>
+</html>

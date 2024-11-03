@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+discid
+musicbrainzngs
+pydantic
+aiofiles
+python-multipart
+psutil
