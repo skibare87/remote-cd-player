@@ -1,31 +1,18 @@
-// Global state
+// Global variables
+let cdInfo = null;
 let currentTrack = null;
 let isPlaying = false;
-let cdInfo = null;
+let pollingInterval = null;
 let lastCheckTime = 0;
 let isInitialized = false;
-let pollingInterval = null;
 let cleanupInitialized = false;
+let audioContext;
+let audioSource;
+let startTime;
+let progressInterval;
+let currentBuffer;
 
 const CHECK_INTERVAL = 5000; // 5 seconds
-
-// Utility Functions
-function formatTime(seconds) {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.floor(seconds % 60);
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-}
-
-function updateControls(enabled = true) {
-    console.log("Updating controls. Enabled:", enabled, "Current track:", currentTrack, "CD Info:", !!cdInfo, "Is Playing:", isPlaying);
-    const hasCD = !!cdInfo && cdInfo.tracks && cdInfo.tracks.length > 0;
-    const trackSelected = currentTrack !== null;
-
-    document.getElementById('play-pause').disabled = !hasCD;
-    document.getElementById('stop-button').disabled = !hasCD || (!isPlaying && !trackSelected);
-    document.getElementById('prev-button').disabled = !hasCD || !trackSelected || currentTrack <= 1;
-    document.getElementById('next-button').disabled = !hasCD || !trackSelected || (currentTrack >= cdInfo.tracks.length);
-}
 
 async function fetchWithTimeout(resource, options = {}) {
     const { timeout = 5000, ...remainingOptions } = options;
@@ -109,7 +96,6 @@ async function playTrack(trackNumber) {
             return;
         }
         
-        // Always stop the current playback before starting a new track
         await stopTrack();
         
         currentTrack = trackNumber;
@@ -125,33 +111,47 @@ async function playTrack(trackNumber) {
         currentTrackElement.textContent = `Loading: ${track.number}. ${track.title}`;
         currentTrackElement.classList.add('track-change');
         
-        const audio = new Audio();
-        
-        // ... (keep the existing event listeners) ...
-
-        console.log(`Setting audio source to /api/cd/play/${trackNumber}`);
-        audio.src = `/api/cd/play/${trackNumber}`;
-        
-        // Attempt to play immediately
-        try {
-            await audio.play();
-            isPlaying = true;
-            document.getElementById('play-pause').textContent = '⏸';
-        } catch (playError) {
-            console.error('Error starting playback:', playError);
-            isPlaying = false;
-            document.getElementById('play-pause').textContent = '▶';
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
+        
+        const response = await fetch(`/api/cd/play/${trackNumber}`);
+        const arrayBuffer = await response.arrayBuffer();
+        
+        try {
+            currentBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        } catch (decodeError) {
+            console.error('Error decoding audio data:', decodeError);
+            throw new Error('Failed to decode audio data');
+        }
+        
+        audioSource = audioContext.createBufferSource();
+        audioSource.buffer = currentBuffer;
+        audioSource.connect(audioContext.destination);
+        
+        audioSource.addEventListener('ended', () => {
+            if (currentTrack < cdInfo.tracks.length) {
+                playTrack(currentTrack + 1);
+            } else {
+                console.log("End of CD reached");
+                stopTrack();
+            }
+        });
+
+        startTime = audioContext.currentTime;
+        audioSource.start();
+        isPlaying = true;
+        document.getElementById('play-pause').textContent = '⏸';
+        
+        currentTrackElement.textContent = `${track.number}. ${track.title}`;
+        currentTrackElement.classList.remove('track-change');
         
         updatePlaylistHighlight();
         updateControls(true);
         
-        if (window.currentAudio) {
-            window.currentAudio.pause();
-            window.currentAudio.src = '';
-            window.currentAudio = null;
-        }
-        window.currentAudio = audio;
+        // Start progress updates
+        updateProgress();
+        progressInterval = setInterval(updateProgress, 1000);
         
         console.log(`Playback initiated for track ${trackNumber}`);
     } catch (error) {
@@ -165,6 +165,18 @@ async function playTrack(trackNumber) {
     }
 }
 
+function updateProgress() {
+    if (!audioSource || !audioContext || !currentBuffer) return;
+    
+    const currentTime = audioContext.currentTime - startTime;
+    const duration = currentBuffer.duration;
+    const progressPercent = (currentTime / duration) * 100;
+    
+    document.getElementById('progress').style.width = `${progressPercent}%`;
+    document.getElementById('current-time').textContent = formatTime(currentTime);
+    document.getElementById('total-time').textContent = formatTime(duration);
+}
+
 function updatePlaylistHighlight() {
     document.querySelectorAll('.track-item').forEach((item, index) => {
         item.classList.toggle('playing', index + 1 === currentTrack);
@@ -175,14 +187,19 @@ async function stopTrack() {
     try {
         stopPolling();
         
-        if (window.currentAudio) {
-            window.currentAudio.pause();
-            window.currentAudio.src = '';
-            window.currentAudio = null;
+        if (audioSource) {
+            audioSource.stop();
+            audioSource.disconnect();
+            audioSource = null;
+        }
+        
+        if (progressInterval) {
+            clearInterval(progressInterval);
+            progressInterval = null;
         }
         
         isPlaying = false;
-        // Do not reset currentTrack here
+        currentBuffer = null;
         
         document.getElementById('play-pause').textContent = '▶';
         document.getElementById('playlist').classList.remove('loading');
@@ -210,56 +227,39 @@ async function stopTrack() {
 }
 
 async function playPause() {
-    console.log("playPause called. Current state:", { cdInfo, currentTrack, isPlaying });
     if (!cdInfo) {
-        console.log("No CD info available, cannot play");
+        console.log("No CD info available, cannot play/pause");
         return;
     }
     
     if (!currentTrack) {
-        console.log("No current track, starting from track 1");
         await playTrack(1);
-        return;
-    }
-    
-    if (isPlaying && window.currentAudio) {
-        console.log("Pausing current track");
-        window.currentAudio.pause();
+    } else if (isPlaying) {
+        audioContext.suspend();
         isPlaying = false;
         document.getElementById('play-pause').textContent = '▶';
     } else {
-        console.log("Starting/resuming playback");
-        await playTrack(currentTrack);
+        audioContext.resume();
+        isPlaying = true;
+        document.getElementById('play-pause').textContent = '⏸';
     }
 }
+
 async function previousTrack() {
-    console.log("Previous track button clicked. Current state:", { cdInfo, currentTrack, isPlaying });
-    if (!cdInfo || !currentTrack) {
-        console.log("No CD info or current track, cannot move to previous track");
-        return;
-    }
+    if (!cdInfo || !currentTrack) return;
     
     const prevTrackNumber = currentTrack - 1;
     if (prevTrackNumber >= 1) {
-        console.log(`Moving to previous track: ${prevTrackNumber}`);
         await playTrack(prevTrackNumber);
-    } else {
-        console.log("Already at the first track");
     }
 }
+
 async function nextTrack() {
-    console.log("Next track button clicked. Current state:", { cdInfo, currentTrack, isPlaying });
-    if (!cdInfo || !currentTrack) {
-        console.log("No CD info or current track, cannot move to next track");
-        return;
-    }
+    if (!cdInfo || !currentTrack) return;
     
     const nextTrackNumber = currentTrack + 1;
     if (nextTrackNumber <= cdInfo.tracks.length) {
-        console.log(`Moving to next track: ${nextTrackNumber}`);
         await playTrack(nextTrackNumber);
-    } else {
-        console.log("Already at the last track");
     }
 }
 
@@ -296,12 +296,6 @@ function initializeCleanupHandlers() {
 
     ['pagehide', 'unload', 'beforeunload'].forEach(event => {
         window.addEventListener(event, cleanupResources);
-    });
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden && isPlaying) {
-            playPause().catch(console.error);
-        }
     });
 }
 
@@ -347,16 +341,28 @@ function initializeKeyboardControls() {
     });
 }
 
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+function updateControls(enabled) {
+    const buttons = document.querySelectorAll('.control-button');
+    buttons.forEach(button => {
+        button.disabled = !enabled;
+    });
+}
+
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
     if (isInitialized) return;
     isInitialized = true;
     console.log("Initializing CD player...");
 
-    // Initialize cleanup handlers
     initializeCleanupHandlers();
+    initializeKeyboardControls();
 
-    // Add button event listeners
     document.getElementById('prev-button').addEventListener('click', async (e) => {
         e.preventDefault();
         try {
@@ -393,10 +399,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Initialize keyboard controls
-    initializeKeyboardControls();
-    
-    // Initial load
+    document.getElementById('progress-bar').addEventListener('click', function(e) {
+        if (!audioSource || !audioContext || !currentBuffer) return;
+        
+        const progressBar = this.getBoundingClientRect();
+        const clickPosition = (e.clientX - progressBar.left) / progressBar.width;
+        const newTime = clickPosition * currentBuffer.duration;
+        
+        audioSource.stop();
+        audioSource = audioContext.createBufferSource();
+        audioSource.buffer = currentBuffer;
+        audioSource.connect(audioContext.destination);
+        audioSource.start(0, newTime);
+        startTime = audioContext.currentTime - newTime;
+        updateProgress();
+    });
+
     loadCDInfo().then(() => {
         console.log("Initial CD info loaded");
         updateControls(true);
@@ -404,6 +422,5 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error("Error loading initial CD info:", error);
     });
     
-    // Start polling
     startPolling();
 });
